@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Flag Peek</title>
+<meta name="description" content="A Flagle-like flag guessing game with tile reveals." />
+<style>
+  :root{
+    --bg:#0f1220;
+    --card:#171a2c;
+    --ink:#e9ecff;
+    --muted:#aeb4d9;
+    --accent:#6ea8ff;
+    --good:#27c281;
+    --bad:#ff5a6f;
+    --warn:#ffc857;
+    --tile:#0d1122;
+    --tile-border:#1f2544;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:radial-gradient(1200px 800px at 70% -10%, #1b1f3a 0%, #0d1021 60%, #0a0c18 100%);
+    color:var(--ink);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:16px;
+  }
+  .app{width:min(920px,100%); display:grid; gap:16px}
+  header{display:flex; align-items:center; justify-content:space-between; gap:12px}
+  h1{margin:0; font-size:clamp(20px,3.5vw,28px); letter-spacing:.5px}
+  .stats{display:flex; gap:12px; font-size:12px; color:var(--muted)}
+  .stat{background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.06); padding:6px 8px; border-radius:8px}
+  .card{
+    background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:14px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.35)
+  }
+  .flag-wrap{
+    position:relative; aspect-ratio:3/2; border-radius:12px; overflow:hidden;
+    background:var(--tile);
+    border:1px solid var(--tile-border);
+  }
+  .flag{
+    position:absolute; inset:0;
+    background-position:center; background-repeat:no-repeat; background-size:cover;
+    filter:saturate(105%) contrast(102%);
+  }
+  .grid{
+    position:absolute; inset:0; display:grid; grid-template-columns:repeat(5,1fr); grid-template-rows:repeat(4,1fr);
+  }
+  .cover{
+    border:1px solid rgba(255,255,255,.05);
+    background:linear-gradient(180deg, #111633, #0d1229);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.03);
+    transition:opacity .35s ease, transform .35s ease;
+  }
+  .cover.revealed{opacity:0; pointer-events:none; transform:scale(1.04)}
+  .controls{display:grid; grid-template-columns:1fr auto; gap:10px; margin-top:14px}
+  input[type="text"]{
+    width:100%; padding:12px 14px; font-size:16px; color:var(--ink);
+    background:#11142a; border:1px solid #2a2f57; border-radius:10px; outline:none;
+  }
+  input::placeholder{color:#8790c7}
+  button{
+    appearance:none; cursor:pointer; padding:12px 14px; font-weight:600;
+    border-radius:10px; border:1px solid transparent; color:#0b1222; background:var(--accent);
+  }
+  button.secondary{
+    background:transparent; color:var(--ink); border:1px solid #2a2f57;
+  }
+  .row{display:flex; gap:10px; flex-wrap:wrap}
+  .pill{
+    padding:8px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.04); color:var(--muted); font-size:12px;
+  }
+  .feedback{margin-top:10px; min-height:28px; font-weight:600}
+  .ok{color:var(--good)} .no{color:var(--bad)} .hint{color:var(--warn)}
+  .guesses{display:flex; flex-direction:column; gap:6px; margin-top:10px}
+  .guess{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.07);
+  }
+  .guess.ok{border-color:rgba(39,194,129,.35); background:rgba(39,194,129,.12)}
+  .footer{
+    margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between
+  }
+  small.muted{color:var(--muted)}
+  .how{font-size:13px; color:var(--muted); margin-top:6px}
+  @media (max-width:520px){
+    .controls{grid-template-columns:1fr}
+    button{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🌍 Flag Peek</h1>
+    <div class="stats">
+      <div class="stat"><strong id="sPlayed">0</strong> played</div>
+      <div class="stat"><strong id="sWins">0</strong> wins</div>
+      <div class="stat"><strong id="sStreak">0</strong> streak</div>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="flag-wrap">
+      <div id="flag" class="flag" aria-hidden="true"></div>
+      <div id="grid" class="grid"></div>
+    </div>
+
+    <div class="how">Guess the country! You have 6 guesses. Each incorrect guess reveals part of the flag. Hints unlock as you go.</div>
+
+    <div class="controls">
+      <form id="form" class="row" autocomplete="off" style="grid-column:1/-1">
+        <input id="guess" type="text" list="countries" placeholder="Type a country and press Enter…" required />
+        <datalist id="countries"></datalist>
+      </form>
+      <div class="row" style="grid-column:1/-1">
+        <button id="giveup" class="secondary" type="button" title="Reveal the answer">Give up</button>
+        <button id="newgame" class="secondary" type="button" title="Start a new round">New game</button>
+      </div>
+    </div>
+
+    <div id="feedback" class="feedback" role="status" aria-live="polite"></div>
+
+    <div id="hints" class="row" style="margin-top:6px"></div>
+
+    <div id="guesses" class="guesses"></div>
+
+    <div class="footer">
+      <small class="muted">Built with ♥ — no images, flags are drawn in SVG.</small>
+      <small class="muted">Rename/extend the dataset as you like.</small>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================
+   Flag Peek — Flagle-like
+   Single-file, no deps
+   ========================= */
+
+/** Utility: encode SVG string as data URL */
+function svgToDataUrl(svg){
+  return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+}
+
+/** Simple color names (for hints) */
+const ColorNames = {
+  '#ffffff':'white','#000000':'black','#d00':'red','#ed2939':'red','#dd0000':'red','#ffce00':'yellow',
+  '#002395':'blue','#0033a0':'blue','#003580':'blue','#005bbb':'blue','#006aa7':'blue','#1eb53a':'green','#009b3a':'green',
+  '#ff7900':'orange','#ff9e00':'orange','#ce1126':'red','#da291c':'red','#006847':'green','#fcd116':'yellow',
+  '#21468b':'blue','#f93':'orange','#008751':'green','#e30a17':'red','#ffcc00':'yellow','#0065bd':'blue',
+  '#009e60':'green','#ef3340':'red'
+};
+
+/** Dataset of flags (drawn procedurally) */
+const FLAGS = [
+  // Horizontal tribands
+  {name:'Austria', continent:'Europe', ratio:'2:3', type:'triband_h', colors:['#ed2939','#ffffff','#ed2939']},
+  {name:'Germany', continent:'Europe', ratio:'3:5', type:'triband_h', colors:['#000000','#dd0000','#ffce00']},
+  {name:'Russia', continent:'Europe & Asia', ratio:'2:3', type:'triband_h', colors:['#ffffff','#0033a0','#d00']},
+  {name:'Netherlands', continent:'Europe', ratio:'2:3', type:'triband_h', colors:['#ae1c28','#ffffff','#21468b']},
+  {name:'Ukraine', continent:'Europe', ratio:'2:3', type:'bicolor_h', colors:['#005bbb','#ffd500']},
+
+  // Vertical tribands
+  {name:'France', continent:'Europe', ratio:'2:3', type:'triband_v', colors:['#002395','#ffffff','#ed2939']},
+  {name:'Italy', continent:'Europe', ratio:'2:3', type:'triband_v', colors:['#009b3a','#ffffff','#ce1126']},
+  {name:'Ireland', continent:'Europe', ratio:'1:2', type:'triband_v', colors:['#169b62','#ffffff','#ff7900']},
+  {name:'Belgium', continent:'Europe', ratio:'13:15', type:'triband_v', colors:['#000000','#ffce00','#ed2939']},
+  {name:'Nigeria', continent:'Africa', ratio:'1:2', type:'triband_v', colors:['#009e60','#ffffff','#009e60']},
+  {name:'Romania', continent:'Europe', ratio:'2:3', type:'triband_v', colors:['#002b7f','#fcd116','#ce1126']},
+
+  // Bicolor & specials
+  {name:'Poland', continent:'Europe', ratio:'5:8', type:'bicolor_h', colors:['#ffffff','#d00']},
+  {name:'Japan', continent:'Asia', ratio:'2:3', type:'disc', colors:['#ffffff'], discColor:'#bc002d', discScale:.45},
+  {name:'Bangladesh', continent:'Asia', ratio:'3:5', type:'disc', colors:['#006a4e'], discColor:'#f42a41', discScale:.48, discOffsetX:-0.08},
+  {name:'Czechia', alt:['Czech Republic'], continent:'Europe', ratio:'2:3', type:'czech', colors:['#ffffff','#d00','#003580']},
+
+  // Nordic crosses
+  {name:'Sweden', continent:'Europe', ratio:'5:8', type:'nordic', base:'#006aa7', cross:'#fecc00'},
+  {name:'Finland', continent:'Europe', ratio:'11:18', type:'nordic', base:'#ffffff', cross:'#003580'},
+  {name:'Denmark', continent:'Europe', ratio:'28:37', type:'nordic', base:'#c60c30', cross:'#ffffff'},
+  {name:'Norway', continent:'Europe', ratio:'8:11', type:'nordic_layered', base:'#ba0c2f', crossBorder:'#ffffff', cross:'#00205b'},
+  {name:'Iceland', continent:'Europe', ratio:'18:25', type:'nordic_layered', base:'#003897', crossBorder:'#ffffff', cross:'#d72828'},
+
+  // Simple cross
+  {name:'Switzerland', continent:'Europe', ratio:'1:1', type:'swiss', base:'#d00', cross:'#ffffff'},
+  // Island
+  {name:'Iceland', continent:'Europe', ratio:'18:25', type:'nordic_layered', base:'#003897', crossBorder:'#ffffff', cross:'#d72828'},
+
+  // Extra easy ones
+  {name:'Austria', continent:'Europe', ratio:'2:3', type:'triband_h', colors:['#ed2939','#ffffff','#ed2939']},
+].filter((v,i,a)=>a.findIndex(t=>t.name===v.name)===i); // de-dup safeguard
+
+/** Draw SVGs for each flag type */
+function drawFlag(def, w=900, h=Math.round(900*2/3)){
+  // Use provided ratio
+  if(def.ratio){
+    const [rh, rw] = def.ratio.split(':').map(Number);
+    if(rh && rw){ h = Math.round((w*rh)/rw); }
+  }
+  const rect = (x,y,w,h,fill)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">`;
+
+  const t = def.type;
+  if(t==='triband_h'){
+    const band = h/3;
+    svg += rect(0,0,w,band,def.colors[0]);
+    svg += rect(0,band,w,band,def.colors[1]);
+    svg += rect(0,band*2,w,band,def.colors[2]);
+  } else if(t==='triband_v'){
+    const band = w/3;
+    svg += rect(0,0,band,h,def.colors[0]);
+    svg += rect(band,0,band,h,def.colors[1]);
+    svg += rect(band*2,0,band,h,def.colors[2]);
+  } else if(t==='bicolor_h'){
+    const band = h/2;
+    svg += rect(0,0,w,band,def.colors[0]);
+    svg += rect(0,band,w,band,def.colors[1]);
+  } else if(t==='disc'){
+    const bg = def.colors[0] || '#ffffff';
+    svg += rect(0,0,w,h,bg);
+    const r = Math.min(w,h) * (def.discScale||0.42) / 2 * 2;
+    const cx = w*(0.5 + (def.discOffsetX||0));
+    const cy = h/2;
+    svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${def.discColor||'#d00'}" />`;
+  } else if(t==='czech'){
+    // Top white, bottom red, blue triangle at hoist
+    svg += rect(0,0,w,h/2,'#ffffff');
+    svg += rect(0,h/2,w,h/2,'#d00');
+    svg += `<polygon points="0,0 ${w*0.5},${h/2} 0,${h}" fill="#003580"/>`;
+  } else if(t==='nordic'){
+    // Simple Nordic cross
+    const base = def.base || '#003897';
+    const cross = def.cross || '#ffce00';
+    svg += rect(0,0,w,h,base);
+    const armW = h/5;                 // cross arm thickness
+    const vertX = w*0.4;              // vertical bar position
+    const border = 0;                 // single layer
+    svg += rect(0,(h-armW)/2,w,armW,cross);               // horizontal
+    svg += rect(vertX - armW/2,0,armW,h,cross);           // vertical
+  } else if(t==='nordic_layered'){
+    // Two-layer (border + inner cross), e.g., Norway, Iceland
+    const base = def.base;
+    const border = def.crossBorder;
+    const cross = def.cross;
+    svg += rect(0,0,w,h,base);
+    const armOuter = h/4.2;
+    const armInner = armOuter*0.6;
+    const vertCenter = w*0.4;
+
+    // Outer (border) arms
+    svg += rect(0,(h-armOuter)/2,w,armOuter,border);
+    svg += rect(vertCenter - armOuter/2,0,armOuter,h,border);
+
+    // Inner (colored) arms
+    svg += rect(0,(h-armInner)/2,w,armInner,cross);
+    svg += rect(vertCenter - armInner/2,0,armInner,h,cross);
+  } else if(t==='swiss'){
+    const base = def.base || '#d00';
+    const cross = def.cross || '#fff';
+    svg += rect(0,0,w,h,base);
+    const arm = Math.min(w,h)/5;
+    const cx = w/2, cy = h/2;
+    svg += rect(cx - arm*1.5, cy - arm/2, arm*3, arm, cross);
+    svg += rect(cx - arm/2, cy - arm*1.5, arm, arm*3, cross);
+  } else {
+    // Fallback: solid color
+    svg += rect(0,0,w,h, def.colors?.[0] || '#222');
+  }
+
+  svg += '</svg>';
+  return svgToDataUrl(svg);
+}
+
+/** Build name search list */
+const SEARCH = FLAGS.map(f=>{
+  const keys = [f.name.toLowerCase(), ...(f.alt||[]).map(a=>a.toLowerCase())];
+  return {keys, ref:f};
+});
+
+/** Game state */
+const MAX_GUESSES = 6;
+let solution, revealedOrder = [], guessCount = 0, finished = false, used = new Set();
+
+/** Elements */
+const elFlag = document.getElementById('flag');
+const elGrid = document.getElementById('grid');
+const elForm = document.getElementById('form');
+const elInput = document.getElementById('guess');
+const elList = document.getElementById('countries');
+const elFeedback = document.getElementById('feedback');
+const elHints = document.getElementById('hints');
+const elGuesses = document.getElementById('guesses');
+const btnGiveUp = document.getElementById('giveup');
+const btnNew = document.getElementById('newgame');
+
+function randInt(n){ return Math.floor(Math.random()*n); }
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=randInt(i+1); [a[i],a[j]]=[a[j],a[i]] } return a; }
+function pickSolution(){
+  const pool = FLAGS.filter(f=>!used.has(f.name));
+  const pick = pool.length? pool[randInt(pool.length)] : FLAGS[randInt(FLAGS.length)];
+  used.add(pick.name);
+  return pick;
+}
+
+function colorWords(def){
+  let cols = [];
+  if(def.type==='disc'){ cols = [def.colors[0]||'#ffffff', def.discColor||'#d00']; }
+  else if(def.type==='nordic' || def.type==='nordic_layered'){ cols = [def.base, def.crossBorder, def.cross].filter(Boolean); }
+  else if(def.type==='swiss'){ cols = [def.base, def.cross]; }
+  else { cols = def.colors||['#fff']; }
+  const uniq = [...new Set(cols.map(c=>ColorNames[c.toLowerCase()]||c))];
+  return uniq;
+}
+
+function flagStyle(def){
+  const url = drawFlag(def, 900);
+  elFlag.style.backgroundImage = `url('${url}')`;
+}
+
+function buildGrid(){
+  elGrid.innerHTML = '';
+  const tiles = 20; // 5 x 4
+  const ids = Array.from({length:tiles}, (_,i)=>i);
+  revealedOrder = shuffle(ids.slice());
+  for(let i=0;i<tiles;i++){
+    const d = document.createElement('div');
+    d.className = 'cover';
+    d.dataset.id = i;
+    elGrid.appendChild(d);
+  }
+}
+
+function revealOne(){
+  if(revealedOrder.length===0) return;
+  const id = revealedOrder.pop();
+  const tile = elGrid.querySelector(`.cover[data-id="${id}"]`);
+  if(tile) tile.classList.add('revealed');
+}
+
+function revealAll(){
+  elGrid.querySelectorAll('.cover').forEach(c=>c.classList.add('revealed'));
+}
+
+function setFeedback(msg, cls=''){
+  elFeedback.className = 'feedback ' + (cls||'');
+  elFeedback.textContent = msg;
+}
+
+function humanType(def){
+  switch(def.type){
+    case 'triband_h': return 'horizontal tricolor';
+    case 'triband_v': return 'vertical tricolor';
+    case 'bicolor_h': return 'horizontal bicolor';
+    case 'disc': return 'disc on field';
+    case 'czech': return 'triangle + bicolor';
+    case 'nordic': return 'Nordic cross';
+    case 'nordic_layered': return 'Nordic cross (bordered)';
+    case 'swiss': return 'centered cross';
+    default: return 'patterned';
+  }
+}
+
+function hintPills(def, stage){
+  // Staged hints: 1) continent, 2) colors, 3) first letter, 4) type/ratio
+  const pills=[];
+  if(stage>=1) pills.push({k:'Continent', v:def.continent});
+  if(stage>=2) pills.push({k:'Colors', v:colorWords(def).join(', ')});
+  if(stage>=3) pills.push({k:'Starts with', v:def.name[0].toUpperCase()});
+  if(stage>=4) pills.push({k:'Flag type', v:`${humanType(def)} • ratio ${def.ratio||'2:3'}`});
+  elHints.innerHTML = pills.map(p=>`<span class="pill"><strong>${p.k}:</strong> ${p.v}</span>`).join('');
+}
+
+function addGuessRow(name, ok){
+  const div = document.createElement('div');
+  div.className = 'guess' + (ok? ' ok':'');
+  div.innerHTML = `<div>${name}</div><div>${ok?'✅':'❌'}</div>`;
+  elGuesses.prepend(div);
+}
+
+function norm(s){ return s.trim().toLowerCase(); }
+function matchName(input){
+  const q = norm(input);
+  for(const item of SEARCH){
+    if(item.keys.includes(q)) return item.ref;
+    // relaxed: exact country name start match
+    if(item.ref.name.toLowerCase()===q) return item.ref;
+  }
+  return null;
+}
+
+/** Stats */
+const STATS_KEY='flagpeek_stats';
+function loadStats(){
+  try{ return JSON.parse(localStorage.getItem(STATS_KEY)) || {played:0,wins:0,streak:0,max:0}; }
+  catch(e){ return {played:0,wins:0,streak:0,max:0}; }
+}
+function saveStats(s){ localStorage.setItem(STATS_KEY, JSON.stringify(s)); }
+function renderStats(){
+  const s = loadStats();
+  document.getElementById('sPlayed').textContent = s.played;
+  document.getElementById('sWins').textContent = s.wins;
+  document.getElementById('sStreak').textContent = s.streak;
+}
+
+/** New game */
+function newGame(){
+  solution = pickSolution();
+  flagStyle(solution);
+  buildGrid();
+  elFeedback.textContent = '';
+  elHints.innerHTML = '';
+  elGuesses.innerHTML = '';
+  guessCount = 0; finished = false;
+  hintPills(solution, 0);
+  elInput.value = '';
+  elInput.focus();
+}
+
+function win(){
+  finished = true;
+  revealAll();
+  setFeedback(`Correct! It was ${solution.name}.`, 'ok');
+  const s = loadStats();
+  s.played++; s.wins++; s.streak++; s.max = Math.max(s.max, s.streak);
+  saveStats(s); renderStats();
+}
+
+function lose(){
+  finished = true;
+  revealAll();
+  setFeedback(`Out of guesses. The answer was ${solution.name}.`, 'no');
+  const s = loadStats();
+  s.played++; s.streak = 0;
+  saveStats(s); renderStats();
+}
+
+/** Wire up search list */
+function buildDatalist(){
+  const names = [...new Set(FLAGS.flatMap(f=>[f.name, ...(f.alt||[])]))].sort((a,b)=>a.localeCompare(b));
+  elList.innerHTML = names.map(n=>`<option value="${n}"></option>`).join('');
+}
+
+elForm.addEventListener('submit', (e)=>{
+  e.preventDefault();
+  if(finished) return;
+  const raw = elInput.value;
+  if(!raw.trim()) return;
+  const guessDef = matchName(raw);
+  if(!guessDef){
+    setFeedback('Country not in the list. Try again.', 'no');
+    return;
+  }
+  const ok = (norm(guessDef.name)===norm(solution.name))
+    || (solution.alt||[]).map(norm).includes(norm(guessDef.name));
+  guessCount++;
+  addGuessRow(guessDef.name, ok);
+
+  if(ok){
+    win();
+  } else {
+    revealOne();
+    const stage = Math.min(4, Math.floor((guessCount+1)/2)); // unlock hints on 1st, 3rd, 5th wrong
+    hintPills(solution, stage);
+    setFeedback(`Nope — tile revealed! (${MAX_GUESSES-guessCount} left)`, 'hint');
+    if(guessCount>=MAX_GUESSES) lose();
+  }
+  elInput.value='';
+  elInput.focus();
+});
+
+btnGiveUp.addEventListener('click', ()=>{
+  if(finished) return;
+  lose();
+});
+btnNew.addEventListener('click', ()=> newGame());
+
+/** Init */
+buildDatalist();
+renderStats();
+newGame();
+
+</script>
+</body>
+</html>
